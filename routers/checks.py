@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List
 import uuid
 
@@ -18,11 +18,27 @@ router = APIRouter(prefix="/api/v1/checks", tags=["checks"])
 
 def calculate_stats(check: DBCheck) -> tuple[int, int]:
     """Calculate passed_days and percentage for a check"""
-    today = datetime.utcnow().date()
-    created_date = check.created_at.date()
+    today = datetime.now(timezone.utc).date()
     
-    # Calculate passed days
-    passed_days = (today - created_date).days
+    # Handle timezone-aware or naive datetime
+    created_at = check.created_at
+    if isinstance(created_at, datetime):
+        if created_at.tzinfo is not None:
+            # Timezone-aware: convert to UTC date
+            created_date = created_at.astimezone(timezone.utc).date()
+        else:
+            # Naive datetime: assume UTC
+            created_date = created_at.date()
+    else:
+        created_date = created_at
+    
+    # Calculate passed days (days since creation, including today)
+    # If created today, passed_days = 1
+    if created_date == today:
+        passed_days = 1
+    else:
+        # Days difference + 1 to include today
+        passed_days = (today - created_date).days + 1
     
     # Count checked days
     checked_count = sum(1 for day in check.day_statuses if day.is_checked)
@@ -138,7 +154,7 @@ async def create_check(
     db.add(db_check)
     
     # Create initial day statuses for the count
-    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     day_statuses = []
     
     for i in range(db_check.count):
@@ -188,7 +204,7 @@ async def update_check(
         
         # If count increased, add new day statuses
         if new_count > check.count:
-            today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             existing_dates = {day.date.date() for day in check.day_statuses}
             
             for i in range(check.count, new_count):
@@ -265,32 +281,50 @@ async def check_today(
             detail="Check not found"
         )
     
-    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_date = today.date()
+    # Get today's date in UTC
+    today_utc = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_date = today_utc.date()
     
     # Find existing day status for today
+    # Compare dates properly by normalizing both to date objects
     existing_day = None
     for day in check.day_statuses:
-        if day.date.date() == today_date:
+        # Get the date part from the stored datetime (which is timezone-aware)
+        day_date_obj = day.date
+        
+        # Convert timezone-aware datetime to UTC date
+        if day_date_obj.tzinfo is not None:
+            # Timezone-aware: convert to UTC and get date
+            day_date = day_date_obj.astimezone(timezone.utc).date()
+        elif isinstance(day_date_obj, datetime):
+            # Naive datetime: assume UTC and get date
+            day_date = day_date_obj.date()
+        else:
+            # Already a date object
+            day_date = day_date_obj
+        
+        # Compare dates (both should be date objects now)
+        if day_date == today_date:
             existing_day = day
             break
     
     if existing_day:
         # Update existing day
         existing_day.is_checked = True
-        existing_day.checked_at = datetime.utcnow()
+        existing_day.checked_at = datetime.now(timezone.utc)
     else:
         # Create new day status for today
         new_day = DBDayStatus(
             id=str(uuid.uuid4()),
             check_id=check.id,
-            date=today,
+            date=today_utc,
             is_checked=True,
-            checked_at=datetime.utcnow()
+            checked_at=datetime.now(timezone.utc)
         )
         db.add(new_day)
         # Update count if today is beyond the original count
-        if today_date > (check.created_at.date() + timedelta(days=check.count - 1)):
+        last_day = check.created_at.date() + timedelta(days=check.count - 1)
+        if today_date > last_day:
             check.count += 1
     
     db.commit()
