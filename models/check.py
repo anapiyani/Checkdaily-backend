@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 
 
 class DayStatusBase(BaseModel):
@@ -46,6 +46,8 @@ class CheckResponse(BaseModel):
     created_at: datetime
     passed_days: int
     percentage: int
+    current_streak: int
+    longest_streak: int
     days: List[DayStatus]
 
 
@@ -55,4 +57,15 @@ class CheckTodayRequest(BaseModel):
 
 class CheckListResponse(BaseModel):
     checks: List[CheckResponse]
+
+
+class YearDayActivity(BaseModel):
+    date: date
+    completed_count: int
+
+
+class YearActivityResponse(BaseModel):
+    year: int
+    max_count: int
+    days: List[YearDayActivity]
 

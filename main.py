@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import auth, checks, user_settings
+from routers import auth, checks, user_settings, stats
 from database import init_db
 # Import models to ensure they're registered with SQLAlchemy
 from models.db_user import DBUser
@@ -28,6 +28,7 @@ async def startup_event():
 app.include_router(auth.router)
 app.include_router(checks.router)
 app.include_router(user_settings.router)
+app.include_router(stats.router)
 
 @app.get("/")
 async def root():
